@@ -1,0 +1,109 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parakeet-tdt-fastapi"
+version = "0.0.1"
+description = "High-accuracy English speech-to-text (FastConformer-TDT) with optional word/char/segment timestamps"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = {text = "LICENSE"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "pydantic>=2.0.0",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
+    "pytorch-lightning>=2.0.0",
+    "lightning>=2.0.0",
+    "nemo-toolkit[asr]>=2.0.0",
+    "python-multipart>=0.0.6",
+    "ffmpeg-python>=0.2.0",
+    "python-dotenv>=1.0.0",
+    "fiddle>=0.3.0",
+    "cloudpickle>=3.1.2",
+    "sentencepiece>=0.2.1",
+    "webdataset>=1.0.2",
+    "braceexpand>=0.1.7",
+    "editdistance>=0.8.1",
+    "inflect>=7.5.0",
+    "lhotse>=1.32.1",
+    "soundfile>=0.13.1",
+    "librosa>=0.11.0",
+    "cuda-python>=12.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "ipython>=8.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/XiiTang/parakeet-tdt-0.6b-v2-fastapi"
+Repository = "https://github.com/XiiTang/parakeet-tdt-0.6b-v2-fastapi"
+Issues = "https://github.com/XiiTang/parakeet-tdt-0.6b-v2-fastapi/issues"
+
+[tool.uv]
+compile-bytecode = true
+python-preference = "only-managed"
+required-version = ">=0.4.0"
+
+[tool.uv.pip]
+compile-bytecode = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["parakeet_service"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 120
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "UP",
+    "B",
+]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
