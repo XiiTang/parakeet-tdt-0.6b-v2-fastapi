@@ -230,13 +230,13 @@ async def transcribe_audio(
     merged_text = " ".join(texts).strip()
     
     # Convert NeMo timestamps to OpenAI Whisper API format
-    segments: Optional[List[TranscriptionSegment]] = None
-    words: Optional[List[TranscriptionWord]] = None
+    # Always return lists (never None) for OpenAI API compatibility
+    segments: List[TranscriptionSegment] = []
+    words: List[TranscriptionWord] = []
     
     if need_timestamps and merged:
         # Build segments from NeMo's 'segment' or fall back to 'word' data
         if 'segment' in merged and merged['segment']:
-            segments = []
             for i, seg in enumerate(merged['segment']):
                 segments.append(TranscriptionSegment(
                     id=i,
@@ -255,7 +255,7 @@ async def transcribe_audio(
             word_list = merged['word']
             if word_list:
                 full_text = ' '.join(w.get('word', '') for w in word_list).strip()
-                segments = [TranscriptionSegment(
+                segments.append(TranscriptionSegment(
                     id=0,
                     seek=0,
                     start=float(word_list[0].get('start', 0)),
@@ -266,11 +266,10 @@ async def transcribe_audio(
                     avg_logprob=0.0,
                     compression_ratio=1.0,
                     no_speech_prob=0.0,
-                )]
+                ))
         
         # Build words list
         if 'word' in merged and merged['word']:
-            words = []
             for w in merged['word']:
                 words.append(TranscriptionWord(
                     word=w.get('word', ''),
