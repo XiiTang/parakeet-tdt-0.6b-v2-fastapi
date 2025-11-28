@@ -50,7 +50,7 @@ dependencies = [
     "lhotse>=1.32.1",
     "soundfile>=0.13.1",
     "librosa>=0.11.0",
-    "cuda-python>=12.3",
+    "cuda-python>=12.3,<13.0",
 ]
 
 [project.optional-dependencies]
