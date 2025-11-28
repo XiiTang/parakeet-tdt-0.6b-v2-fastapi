@@ -5,17 +5,17 @@ Offline VAD-aware splitters
   - target 60-s chunks (±10 s)
   - never cut mid-utterance (trailing silence ≥ 300 ms)
   - processes audio incrementally to minimize memory usage
-  - returns List[pathlib.Path] of temp .wav files
+  - returns List[Tuple[pathlib.Path, float]] of (temp .wav file, offset in seconds)
 
 * vad_chunk_streaming  – Low-RAM streamer for streaming use cases
   - processes audio in small stripes (2 seconds at a time)
   - uses VADIterator to split on speech boundaries
-  - returns List[pathlib.Path] of temp .wav files
+  - returns List[Tuple[pathlib.Path, float]] of (temp .wav file, offset in seconds)
 """
 
 from __future__ import annotations
 import tempfile, wave, pathlib, numpy as np
-from typing import List
+from typing import List, Tuple
 import soundfile as sf
 
 
@@ -30,8 +30,12 @@ MAX_SEC            = 70          # never exceed this in one chunk
 TRAIL_SIL_MS       = 300         # keep ≥300 ms silence at cut point
 THRESH             = 0.60        # stricter prob threshold
 
-def vad_chunk_lowmem(path: pathlib.Path) -> List[pathlib.Path]:
-    """Low-memory VAD chunking for non-streaming processing"""
+def vad_chunk_lowmem(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
+    """Low-memory VAD chunking for non-streaming processing
+    
+    Returns:
+        List of (chunk_path, offset_seconds) tuples
+    """
     import librosa
     
     # Get audio file info
@@ -50,8 +54,10 @@ def vad_chunk_lowmem(path: pathlib.Path) -> List[pathlib.Path]:
     
     # Buffer for current chunk
     current_chunk = bytearray()
-    chunks = []
+    chunks = []  # List of (path, offset_seconds)
     speech_ms = 0
+    chunk_start_sample = 0  # Track start of current chunk in samples
+    total_samples_processed = 0
     
     # Process audio in chunks
     for chunk_start in range(0, int(duration * SAMPLE_RATE), STRIPE_FRAMES):
@@ -80,17 +86,21 @@ def vad_chunk_lowmem(path: pathlib.Path) -> List[pathlib.Path]:
             # Add to current chunk
             current_chunk.extend(window.tobytes())
             speech_ms += 32
+            total_samples_processed += 512
             
             # Check if we should finalize chunk
             if (evt and evt.get("end")) or speech_ms >= MAX_CHUNK_MS:
                 if current_chunk:
-                    chunks.append(_flush(current_chunk))
+                    offset_seconds = chunk_start_sample / SAMPLE_RATE
+                    chunks.append((_flush(current_chunk), offset_seconds))
                     current_chunk.clear()
                     speech_ms = 0
+                    chunk_start_sample = total_samples_processed
     
     # Finalize last chunk
     if current_chunk:
-        chunks.append(_flush(current_chunk))
+        offset_seconds = chunk_start_sample / SAMPLE_RATE
+        chunks.append((_flush(current_chunk), offset_seconds))
     
     return chunks
 
@@ -111,10 +121,13 @@ def _flush(buf: bytearray) -> pathlib.Path:
         wf.writeframes(bytes(buf))
     return pathlib.Path(tmp.name)
 
-def vad_chunk_streaming(path: pathlib.Path) -> List[pathlib.Path]:
+def vad_chunk_streaming(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
     """
     Stream the file in small stripes and split on VADIterator boundaries.
     Uses the SAME PyTorch Silero model, but keeps only a few seconds in RAM.
+    
+    Returns:
+        List of (chunk_path, offset_seconds) tuples
     """
     vad_iter = VADIterator(
         vad_model,
@@ -126,6 +139,8 @@ def vad_chunk_streaming(path: pathlib.Path) -> List[pathlib.Path]:
 
     paths, buf = [], bytearray()
     speech_ms  = 0
+    chunk_start_sample = 0  # Track start of current chunk in samples
+    total_samples_processed = 0
 
     with sf.SoundFile(path) as snd:
         while True:
@@ -144,12 +159,16 @@ def vad_chunk_streaming(path: pathlib.Path) -> List[pathlib.Path]:
                 evt = vad_iter(window)
                 buf.extend(audio[start:start+512].tobytes())
                 speech_ms += 32
+                total_samples_processed += 512
 
                 if (evt and evt.get("end")) or speech_ms >= MAX_CHUNK_MS:
-                    paths.append(_flush(buf))
+                    offset_seconds = chunk_start_sample / SAMPLE_RATE
+                    paths.append((_flush(buf), offset_seconds))
                     buf.clear()
                     speech_ms = 0
+                    chunk_start_sample = total_samples_processed
 
     if buf:
-        paths.append(_flush(buf))
+        offset_seconds = chunk_start_sample / SAMPLE_RATE
+        paths.append((_flush(buf), offset_seconds))
     return paths

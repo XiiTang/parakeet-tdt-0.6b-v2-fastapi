@@ -4,12 +4,13 @@ import shutil
 import tempfile
 from pathlib import Path
 from collections import defaultdict
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status, Request, Form
 
 from .audio import ensure_mono_16k, schedule_cleanup
 from .model import _to_builtin
-from .schemas import TranscriptionResponse
+from .schemas import TranscriptionResponse, TranscriptionSegment, TranscriptionWord
 from .config import logger
 
 from parakeet_service.model import reset_fast_path
@@ -43,13 +44,30 @@ async def transcribe_audio(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., media_type="audio/*"),
+    # OpenAI Whisper API compatible parameters
+    model: str = Form("parakeet-tdt-0.6b-v2", description="Model name (ignored, uses parakeet)"),
+    language: str = Form("en", description="Language code"),
+    prompt: str = Form("", description="Initial prompt for transcription"),
+    response_format: str = Form("verbose_json", description="Response format: json, text, srt, verbose_json, vtt"),
+    timestamp_granularities: List[str] = Form(default=[], description="Timestamp granularities: word, segment"),
+    # Legacy parameters for backward compatibility
     include_timestamps: bool = Form(
-        False, description="Return char/word/segment offsets",
+        False, description="Return char/word/segment offsets (legacy parameter)",
     ),
     should_chunk: bool = Form(True,
         description="If true (default), split long audio into "
                     "~60s VAD-aligned chunks for batching"),
 ):
+    # Determine if timestamps are needed based on response_format or timestamp_granularities
+    need_timestamps = (
+        include_timestamps 
+        or response_format == "verbose_json" 
+        or len(timestamp_granularities) > 0
+    )
+    
+    logger.info(f"Transcription request: model={model}, language={language}, response_format={response_format}, "
+                f"timestamp_granularities={timestamp_granularities}, need_timestamps={need_timestamps}")
+    
     # Create temp file with appropriate extension
     suffix = Path(file.filename or "").suffix or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -152,11 +170,16 @@ async def transcribe_audio(
 
     if should_chunk:
         # Use low-memory chunker for non-streaming requests
-      chunk_paths = vad_chunk_lowmem(to_model) or [to_model]
+        # Returns List[Tuple[pathlib.Path, float]] - (chunk_path, offset_seconds)
+        chunk_data = vad_chunk_lowmem(to_model) or [(to_model, 0.0)]
+        chunk_paths = [p for p, _ in chunk_data]
+        chunk_offsets = [offset for _, offset in chunk_data]
     else:
         chunk_paths = [to_model]
+        chunk_offsets = [0.0]
 
-    logger.info("transcribe(): sending %d chunks to ASR", len(chunk_paths))
+    logger.info("transcribe(): sending %d chunks to ASR (offsets: %s)", 
+                len(chunk_paths), [f"{o:.1f}s" for o in chunk_offsets])
 
     # Clean up all temporary files
     cleanup_files = [original, to_model] + chunk_paths
@@ -165,19 +188,19 @@ async def transcribe_audio(
     schedule_cleanup(background_tasks, *cleanup_files)
 
     # 2 – run ASR
-    model = request.app.state.asr_model
+    asr_model = request.app.state.asr_model
 
     try:
-        outs = model.transcribe(
+        outs = asr_model.transcribe(
             [str(p) for p in chunk_paths],
             batch_size=2,
-            timestamps=include_timestamps,
+            timestamps=need_timestamps,
         )
         if (
-          not include_timestamps                     # switch back to model fast-path if timestamps turned off
-          and getattr(model.cfg.decoding, "compute_timestamps", False)
+          not need_timestamps                     # switch back to model fast-path if timestamps turned off
+          and getattr(asr_model.cfg.decoding, "compute_timestamps", False)
         ):
-          reset_fast_path(model)                    
+          reset_fast_path(asr_model)                    
     except RuntimeError as exc:
         logger.exception("ASR failed")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -186,19 +209,83 @@ async def transcribe_audio(
     if isinstance(outs, tuple):
       outs = outs[0]
     texts = []
-    ts_agg = [] if include_timestamps else None
     merged = defaultdict(list)
 
-    for h in outs:
+    for idx, h in enumerate(outs):
         texts.append(getattr(h, "text", str(h)))
-        if include_timestamps:
+        if need_timestamps:
+            # Get the time offset for this chunk (in seconds)
+            chunk_offset = chunk_offsets[idx] if idx < len(chunk_offsets) else 0.0
+            
             for k, v in _to_builtin(getattr(h, "timestamp", {})).items():
-                merged[k].extend(v)           # concat lists
+                # Add chunk offset to each timestamp
+                for item in v:
+                    if isinstance(item, dict):
+                        if 'start' in item:
+                            item['start'] = item['start'] + chunk_offset
+                        if 'end' in item:
+                            item['end'] = item['end'] + chunk_offset
+                merged[k].extend(v)
 
     merged_text = " ".join(texts).strip()
-    timestamps  = dict(merged) if include_timestamps else None
+    
+    # Convert NeMo timestamps to OpenAI Whisper API format
+    segments: Optional[List[TranscriptionSegment]] = None
+    words: Optional[List[TranscriptionWord]] = None
+    
+    if need_timestamps and merged:
+        # Build segments from NeMo's 'segment' or fall back to 'word' data
+        if 'segment' in merged and merged['segment']:
+            segments = []
+            for i, seg in enumerate(merged['segment']):
+                segments.append(TranscriptionSegment(
+                    id=i,
+                    seek=0,
+                    start=float(seg.get('start', 0)),
+                    end=float(seg.get('end', 0)),
+                    text=seg.get('segment', '').strip(),
+                    tokens=[],
+                    temperature=0.0,
+                    avg_logprob=0.0,
+                    compression_ratio=1.0,
+                    no_speech_prob=0.0,
+                ))
+        elif 'word' in merged and merged['word']:
+            # If no segments, create a single segment from all words
+            word_list = merged['word']
+            if word_list:
+                full_text = ' '.join(w.get('word', '') for w in word_list).strip()
+                segments = [TranscriptionSegment(
+                    id=0,
+                    seek=0,
+                    start=float(word_list[0].get('start', 0)),
+                    end=float(word_list[-1].get('end', 0)),
+                    text=full_text,
+                    tokens=[],
+                    temperature=0.0,
+                    avg_logprob=0.0,
+                    compression_ratio=1.0,
+                    no_speech_prob=0.0,
+                )]
+        
+        # Build words list
+        if 'word' in merged and merged['word']:
+            words = []
+            for w in merged['word']:
+                words.append(TranscriptionWord(
+                    word=w.get('word', ''),
+                    start=float(w.get('start', 0)),
+                    end=float(w.get('end', 0)),
+                ))
 
-    return TranscriptionResponse(text=merged_text, timestamps=timestamps)
+    return TranscriptionResponse(
+        text=merged_text,
+        task="transcribe",
+        language="en",
+        duration=None,
+        segments=segments,
+        words=words,
+    )
 
 @router.get("/debug/cfg")
 def show_cfg(request: Request):

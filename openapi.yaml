@@ -17,6 +17,56 @@ paths:
           content:
             application/json:
               schema: {}
+  /v1/audio/transcriptions:
+    post:
+      tags:
+      - speech
+      summary: Transcribe an audio file (OpenAI-compatible endpoint)
+      operationId: transcribe_audio_v1_audio_transcriptions_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_transcribe_audio_v1_audio_transcriptions_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /audio/transcriptions:
+    post:
+      tags:
+      - speech
+      summary: Transcribe an audio file
+      operationId: transcribe_audio_audio_transcriptions_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_transcribe_audio_audio_transcriptions_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /transcribe:
     post:
       tags:
@@ -56,16 +106,91 @@ paths:
               schema: {}
 components:
   schemas:
+    Body_transcribe_audio_audio_transcriptions_post:
+      properties:
+        file:
+          type: string
+          format: binary
+          title: File
+        model:
+          type: string
+          title: Model
+          description: Model name (ignored, uses parakeet)
+          default: parakeet-tdt-0.6b-v2
+        language:
+          type: string
+          title: Language
+          description: Language code
+          default: en
+        prompt:
+          type: string
+          title: Prompt
+          description: Initial prompt for transcription
+          default: ''
+        response_format:
+          type: string
+          title: Response Format
+          description: 'Response format: json, text, srt, verbose_json, vtt'
+          default: verbose_json
+        timestamp_granularities:
+          items:
+            type: string
+          type: array
+          title: Timestamp Granularities
+          description: 'Timestamp granularities: word, segment'
+          default: []
+        include_timestamps:
+          type: boolean
+          title: Include Timestamps
+          description: Return char/word/segment offsets (legacy parameter)
+          default: false
+        should_chunk:
+          type: boolean
+          title: Should Chunk
+          description: If true (default), split long audio into ~60s VAD-aligned chunks
+            for batching
+          default: true
+      type: object
+      required:
+      - file
+      title: Body_transcribe_audio_audio_transcriptions_post
     Body_transcribe_audio_transcribe_post:
       properties:
         file:
           type: string
           format: binary
           title: File
+        model:
+          type: string
+          title: Model
+          description: Model name (ignored, uses parakeet)
+          default: parakeet-tdt-0.6b-v2
+        language:
+          type: string
+          title: Language
+          description: Language code
+          default: en
+        prompt:
+          type: string
+          title: Prompt
+          description: Initial prompt for transcription
+          default: ''
+        response_format:
+          type: string
+          title: Response Format
+          description: 'Response format: json, text, srt, verbose_json, vtt'
+          default: verbose_json
+        timestamp_granularities:
+          items:
+            type: string
+          type: array
+          title: Timestamp Granularities
+          description: 'Timestamp granularities: word, segment'
+          default: []
         include_timestamps:
           type: boolean
           title: Include Timestamps
-          description: Return char/word/segment offsets
+          description: Return char/word/segment offsets (legacy parameter)
           default: false
         should_chunk:
           type: boolean
@@ -77,6 +202,54 @@ components:
       required:
       - file
       title: Body_transcribe_audio_transcribe_post
+    Body_transcribe_audio_v1_audio_transcriptions_post:
+      properties:
+        file:
+          type: string
+          format: binary
+          title: File
+        model:
+          type: string
+          title: Model
+          description: Model name (ignored, uses parakeet)
+          default: parakeet-tdt-0.6b-v2
+        language:
+          type: string
+          title: Language
+          description: Language code
+          default: en
+        prompt:
+          type: string
+          title: Prompt
+          description: Initial prompt for transcription
+          default: ''
+        response_format:
+          type: string
+          title: Response Format
+          description: 'Response format: json, text, srt, verbose_json, vtt'
+          default: verbose_json
+        timestamp_granularities:
+          items:
+            type: string
+          type: array
+          title: Timestamp Granularities
+          description: 'Timestamp granularities: word, segment'
+          default: []
+        include_timestamps:
+          type: boolean
+          title: Include Timestamps
+          description: Return char/word/segment offsets (legacy parameter)
+          default: false
+        should_chunk:
+          type: boolean
+          title: Should Chunk
+          description: If true (default), split long audio into ~60s VAD-aligned chunks
+            for batching
+          default: true
+      type: object
+      required:
+      - file
+      title: Body_transcribe_audio_v1_audio_transcriptions_post
     HTTPValidationError:
       properties:
         detail:
@@ -91,18 +264,122 @@ components:
         text:
           type: string
           title: Text
-          description: Plain transcription.
-        timestamps:
+          description: Full transcription text.
+        task:
+          type: string
+          title: Task
+          description: Task type.
+          default: transcribe
+        language:
+          type: string
+          title: Language
+          description: Detected language.
+          default: en
+        duration:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: number
           - type: 'null'
-          title: Timestamps
-          description: Word/segment/char offsets (see NeMo docs).
+          title: Duration
+          description: Audio duration in seconds.
+        segments:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/TranscriptionSegment'
+            type: array
+          - type: 'null'
+          title: Segments
+          description: Segment-level timestamps (OpenAI Whisper API compatible).
+        words:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/TranscriptionWord'
+            type: array
+          - type: 'null'
+          title: Words
+          description: Word-level timestamps (OpenAI Whisper API compatible).
       type: object
       required:
       - text
       title: TranscriptionResponse
+      description: OpenAI Whisper API verbose_json compatible response.
+    TranscriptionSegment:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Segment ID.
+        seek:
+          type: integer
+          title: Seek
+          description: Seek offset.
+          default: 0
+        start:
+          type: number
+          title: Start
+          description: Start time in seconds.
+        end:
+          type: number
+          title: End
+          description: End time in seconds.
+        text:
+          type: string
+          title: Text
+          description: Segment text.
+        tokens:
+          items:
+            type: integer
+          type: array
+          title: Tokens
+          description: Token IDs.
+        temperature:
+          type: number
+          title: Temperature
+          description: Sampling temperature.
+          default: 0.0
+        avg_logprob:
+          type: number
+          title: Avg Logprob
+          description: Average log probability.
+          default: 0.0
+        compression_ratio:
+          type: number
+          title: Compression Ratio
+          description: Compression ratio.
+          default: 1.0
+        no_speech_prob:
+          type: number
+          title: No Speech Prob
+          description: No speech probability.
+          default: 0.0
+      type: object
+      required:
+      - id
+      - start
+      - end
+      - text
+      title: TranscriptionSegment
+      description: Segment-level timestamp info (OpenAI Whisper API compatible).
+    TranscriptionWord:
+      properties:
+        word:
+          type: string
+          title: Word
+          description: The word text.
+        start:
+          type: number
+          title: Start
+          description: Start time in seconds.
+        end:
+          type: number
+          title: End
+          description: End time in seconds.
+      type: object
+      required:
+      - word
+      - start
+      - end
+      title: TranscriptionWord
+      description: Word-level timestamp info (OpenAI Whisper API compatible).
     ValidationError:
       properties:
         loc:
