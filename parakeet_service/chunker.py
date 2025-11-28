@@ -25,6 +25,8 @@ SPEECH_PAD_MS = 120          # Padding around speech
 VAD_THRESHOLD = 0.60         # VAD probability threshold
 STRIPE_SEC = 2               # Read audio in N-second stripes
 STRIPE_FRAMES = SAMPLE_RATE * STRIPE_SEC
+# Avoid returning ultra-short chunks that break NeMo normalization
+MIN_CHUNK_SAMPLES = 1024     # ~64 ms @16k
 
 # Load Silero VAD model once
 _vad_model, _vad_utils = torch_hub_load("snakers4/silero-vad", "silero_vad")
@@ -54,7 +56,7 @@ def vad_chunk_lowmem(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
         duration = len(snd) / snd.samplerate
     
     vad_iter = _new_vad()
-    chunks, buf, chunk_ms, chunk_start, total = [], bytearray(), 0, 0, 0
+    chunks, buf, chunk_ms, chunk_start, total = [], bytearray(), 0.0, 0, 0
     
     for stripe_start in range(0, int(duration * SAMPLE_RATE), STRIPE_FRAMES):
         audio, _ = librosa.load(path, sr=SAMPLE_RATE, offset=stripe_start/SAMPLE_RATE,
@@ -63,19 +65,27 @@ def vad_chunk_lowmem(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
         
         for i in range(0, len(audio_int16), 512):
             window = audio_int16[i:i+512]
-            if len(window) < 512:
+            if len(window) == 0:
                 break
-            evt = vad_iter(window.astype(np.float32) / 32768)
+
+            # Pad final window for VAD, but keep real length for timestamps
+            vad_window = window
+            if len(window) < 512:
+                vad_window = np.pad(window, (0, 512 - len(window)))
+
+            evt = vad_iter(vad_window.astype(np.float32) / 32768)
             buf.extend(window.tobytes())
-            chunk_ms += 32
-            total += 512
+
+            step_ms = len(window) * 1000.0 / SAMPLE_RATE
+            chunk_ms += step_ms
+            total += len(window)
             
             if (evt and evt.get("end")) or chunk_ms >= MAX_CHUNK_MS:
-                if buf:
+                if len(buf) // 2 >= MIN_CHUNK_SAMPLES:
                     chunks.append((_flush(buf), chunk_start / SAMPLE_RATE))
-                    buf.clear(); chunk_ms = 0; chunk_start = total
-    
-    if buf:
+                    buf.clear(); chunk_ms = 0.0; chunk_start = total
+                
+    if len(buf) // 2 >= MIN_CHUNK_SAMPLES:
         chunks.append((_flush(buf), chunk_start / SAMPLE_RATE))
     return chunks
 
@@ -83,7 +93,7 @@ def vad_chunk_lowmem(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
 def vad_chunk_streaming(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
     """Streaming VAD chunking using soundfile for efficient I/O."""
     vad_iter = _new_vad()
-    chunks, buf, chunk_ms, chunk_start, total = [], bytearray(), 0, 0, 0
+    chunks, buf, chunk_ms, chunk_start, total = [], bytearray(), 0.0, 0, 0
     
     with sf.SoundFile(path) as snd:
         while True:
@@ -94,17 +104,25 @@ def vad_chunk_streaming(path: pathlib.Path) -> List[Tuple[pathlib.Path, float]]:
             
             for i in range(0, len(audio_f32), 512):
                 window = audio_f32[i:i+512]
-                if len(window) < 512:
+                if len(window) == 0:
                     break
-                evt = vad_iter(window)
-                buf.extend(audio[i:i+512].tobytes())
-                chunk_ms += 32
-                total += 512
+
+                vad_window = window
+                if len(window) < 512:
+                    vad_window = np.pad(window, (0, 512 - len(window)))
+
+                evt = vad_iter(vad_window)
+                buf.extend(audio[i:i+len(window)].tobytes())
+
+                step_ms = len(window) * 1000.0 / SAMPLE_RATE
+                chunk_ms += step_ms
+                total += len(window)
                 
                 if (evt and evt.get("end")) or chunk_ms >= MAX_CHUNK_MS:
-                    chunks.append((_flush(buf), chunk_start / SAMPLE_RATE))
-                    buf.clear(); chunk_ms = 0; chunk_start = total
+                    if len(buf) // 2 >= MIN_CHUNK_SAMPLES:
+                        chunks.append((_flush(buf), chunk_start / SAMPLE_RATE))
+                        buf.clear(); chunk_ms = 0.0; chunk_start = total
     
-    if buf:
+    if len(buf) // 2 >= MIN_CHUNK_SAMPLES:
         chunks.append((_flush(buf), chunk_start / SAMPLE_RATE))
     return chunks
