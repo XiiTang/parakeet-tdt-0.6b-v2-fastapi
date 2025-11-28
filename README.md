@@ -18,8 +18,7 @@ A production-ready FastAPI service for high-accuracy English speech-to-text usin
   - Micro-batching for efficient GPU utilization
   - Configurable batch size and processing timeout
 
-- **Production-ready deployment**  
-  - Docker and Docker Compose support
+- **Production-ready**  
   - Health checks and configuration endpoints
   - Environment variable configuration
 
@@ -43,34 +42,24 @@ A production-ready FastAPI service for high-accuracy English speech-to-text usin
 
 ## Prerequisites
 
-- Python 3.10+  
+- Python 3.11  
 - NVIDIA GPU with CUDA 12.1+ (recommended)
-- Docker Engine 24.0+ (for container deployment)
+- [uv](https://docs.astral.sh/uv/) - Fast Python package manager
 
 ## Installation
 
-### Local Development
 ```bash
-git clone https://github.com/your-repo/parakeet-fastapi.git
-cd parakeet-fastapi
+git clone https://github.com/XiiTang/parakeet-tdt-0.6b-v2-fastapi.git
+cd parakeet-tdt-0.6b-v2-fastapi
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate
+# Install uv (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
-pip install -r requirements.txt
-```
+# Sync dependencies
+uv sync
 
-### Docker Deployment
-```bash
-docker build -t parakeet-stt .
-docker run -d -p 8000:8000 --gpus all parakeet-stt
-```
-
-### Docker Compose
-```bash
-docker-compose up --build
+# For development dependencies
+uv sync --extra dev
 ```
 
 ## Configuration
@@ -95,14 +84,14 @@ PROCESSING_TIMEOUT=60
 
 ## Running the Server
 
-### Local Development
+### Development
 ```bash
-uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Production
 ```bash
-docker-compose up --build -d
+uv run uvicorn parakeet_service.main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Usage
