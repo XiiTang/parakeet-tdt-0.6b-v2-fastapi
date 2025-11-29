@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Tuple, List
 import tempfile
 
+import torch
 import torchaudio
 import torchaudio.functional as AF
 import soundfile as sf
@@ -48,7 +49,7 @@ def convert_audio_streaming(src: Path) -> Tuple[Path, Path]:
                     
                     # Resample if needed
                     if sr_orig != 16000:
-                        chunk_tensor = torchaudio.tensor(chunk).unsqueeze(0)
+                        chunk_tensor = torch.tensor(chunk).unsqueeze(0)
                         chunk = AF.resample(chunk_tensor, sr_orig, 16000)
                         chunk = chunk.squeeze(0).numpy()
                     
