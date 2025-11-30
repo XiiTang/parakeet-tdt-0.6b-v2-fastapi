@@ -19,6 +19,12 @@ load_dotenv()
 MODEL_NAME = os.getenv("MODEL_NAME", "nvidia/parakeet-tdt-0.6b-v2")
 MODEL_PRECISION = os.getenv("MODEL_PRECISION", "fp16")  # fp16 or fp32
 DEVICE = os.getenv("DEVICE", "cuda")  # cuda or cpu
+ENABLE_CUDA_COMPILE = os.getenv("ENABLE_CUDA_COMPILE", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}  # Enable torch.compile CUDA optimizations
 
 # =============================================================================
 # Batch Processing

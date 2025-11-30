@@ -5,7 +5,7 @@ import torch, asyncio
 import nemo.collections.asr as nemo_asr
 from omegaconf import open_dict
 
-from .config import MODEL_NAME, MODEL_PRECISION, DEVICE, logger
+from .config import MODEL_NAME, MODEL_PRECISION, DEVICE, ENABLE_CUDA_COMPILE, logger
 
 from parakeet_service.batchworker import batch_worker
 
@@ -35,6 +35,29 @@ def cleanup_cuda_cache():
             ipc_collect()
 
 
+def _maybe_compile_model(model):
+    """Optionally compile the model for faster CUDA inference."""
+    if not ENABLE_CUDA_COMPILE:
+        return model
+    device_lower = str(DEVICE).lower()
+    if not device_lower.startswith("cuda") or not torch.cuda.is_available():
+        logger.warning("ENABLE_CUDA_COMPILE is set but CUDA is unavailable (DEVICE=%s)", DEVICE)
+        return model
+
+    compile_fn = getattr(torch, "compile", None)
+    if compile_fn is None:
+        logger.warning("ENABLE_CUDA_COMPILE is set but torch.compile is missing; skipping")
+        return model
+
+    try:
+        compiled = compile_fn(model, mode="reduce-overhead", fullgraph=False)
+        logger.info("Enabled torch.compile CUDA optimization (mode=reduce-overhead)")
+        return compiled
+    except Exception:
+        logger.exception("torch.compile failed; continuing with uncompiled model")
+        return model
+
+
 @asynccontextmanager
 async def lifespan(app):
     """Load model once per process; free GPU on shutdown."""
@@ -50,6 +73,7 @@ async def lifespan(app):
         ).to(dtype=dtype)
         logger.info("Loaded model with %s weights on %s", MODEL_PRECISION.upper(), DEVICE)
 
+    model = _maybe_compile_model(model)
     cleanup_cuda_cache()
     logger.info("Memory cleanup complete")
 

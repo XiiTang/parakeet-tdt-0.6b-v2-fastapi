@@ -70,6 +70,7 @@ All configuration is managed through environment variables. Create a `.env` file
 # Model configuration
 MODEL_PRECISION=fp16
 DEVICE=cuda
+ENABLE_CUDA_COMPILE=false
 BATCH_SIZE=4
 
 # Audio processing
@@ -190,6 +191,7 @@ H --> A
 |----------|---------|-------------|
 | `MODEL_PRECISION` | fp16 | Model precision (fp16/fp32) |
 | `DEVICE` | cuda | Computation device |
+| `ENABLE_CUDA_COMPILE` | false | Enable `torch.compile` CUDA optimizations (first request warms up) |
 | `BATCH_SIZE` | 4 | Processing batch size |
 | `TARGET_SR` | 16000 | Target sample rate |
 | `VAD_THRESHOLD` | 0.5 | Voice activity threshold |
