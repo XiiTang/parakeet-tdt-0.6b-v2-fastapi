@@ -3,16 +3,14 @@ import io, wave, tempfile, numpy as np, torch
 from typing import List
 from torch.hub import load as torch_hub_load
 
+from .config import TARGET_SR, VAD_THRESHOLD, MIN_SILENCE_MS, SPEECH_PAD_MS, MAX_SPEECH_MS
+
 vad_model, vad_utils = torch_hub_load("snakers4/silero-vad", "silero_vad")
 (_, _, _, VADIterator, _) = vad_utils
 
-# TODO: Update to read from .env
-SAMPLE_RATE              = 16_000         # model is trained for 16 kHz
-WINDOW_SAMPLES           = 512            # 32 ms frame
-THRESHOLD                = 0.60           # voice prob ≥ 0.60 → speech
-MIN_SILENCE_MS           = 250            # flush after ≥250 ms quiet
-SPEECH_PAD_MS            = 120            # keep 120 ms context before/after
-MAX_SPEECH_MS            = 8_000          # hard stop at 8 s
+# Derived constants
+SAMPLE_RATE = TARGET_SR
+WINDOW_SAMPLES = 512          # 32 ms frame
 
 # Helper: float32 → int16 PCM bytes
 def _f32_to_pcm16(frames: np.ndarray) -> bytes:
@@ -28,7 +26,7 @@ class StreamingVAD:
         self.vad = VADIterator(
             vad_model,
             sampling_rate=SAMPLE_RATE,
-            threshold=THRESHOLD,
+            threshold=VAD_THRESHOLD,
             min_silence_duration_ms=MIN_SILENCE_MS,
             speech_pad_ms=SPEECH_PAD_MS,
         )

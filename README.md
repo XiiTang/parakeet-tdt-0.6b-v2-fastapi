@@ -74,12 +74,10 @@ BATCH_SIZE=4
 
 # Audio processing
 TARGET_SR=16000
-MAX_AUDIO_DURATION=30
 VAD_THRESHOLD=0.5
 
 # System
 LOG_LEVEL=INFO
-PROCESSING_TIMEOUT=60
 ```
 
 ## Running the Server
@@ -194,10 +192,8 @@ H --> A
 | `DEVICE` | cuda | Computation device |
 | `BATCH_SIZE` | 4 | Processing batch size |
 | `TARGET_SR` | 16000 | Target sample rate |
-| `MAX_AUDIO_DURATION` | 30 | Max audio length in seconds |
 | `VAD_THRESHOLD` | 0.5 | Voice activity threshold |
 | `LOG_LEVEL` | INFO | Logging verbosity |
-| `PROCESSING_TIMEOUT` | 60 | Processing timeout in seconds |
 
 ## Contributing
 

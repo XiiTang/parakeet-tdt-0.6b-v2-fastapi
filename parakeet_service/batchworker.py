@@ -2,6 +2,7 @@ import asyncio, contextlib, logging, tempfile, pathlib, time, torch
 from typing import Union, List
 
 from parakeet_service import model as mdl
+from parakeet_service.config import BATCH_SIZE
 
 logger = logging.getLogger("batcher")
 logger.setLevel(logging.DEBUG)
@@ -22,7 +23,7 @@ def _as_path(blob: Union[str, bytes]) -> str:
     return tmp.name
 
 # -------- main worker --------------------------------------------------------
-async def batch_worker(model, batch_ms: float = 15.0, max_batch: int = 4):
+async def batch_worker(model, batch_ms: float = 15.0, max_batch: int = BATCH_SIZE):
     """Forever drain `transcription_queue` → ASR → `results`."""
     logger.info("worker started (batch ≤%d, window %.0f ms)", max_batch, batch_ms)
     logger.info("worker started with model id=%s", id(model))

@@ -15,18 +15,15 @@ import numpy as np
 import soundfile as sf
 from torch.hub import load as torch_hub_load
 
+from .config import TARGET_SR, VAD_THRESHOLD, MIN_SILENCE_MS, SPEECH_PAD_MS, MAX_CHUNK_MS
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Configuration
+# Derived constants
 # ─────────────────────────────────────────────────────────────────────────────
-SAMPLE_RATE = 16_000
-MAX_CHUNK_MS = 60_000        # Hard cap per chunk
-MIN_SILENCE_MS = 300         # Minimum silence to consider as cut point
-SPEECH_PAD_MS = 120          # Padding around speech
-VAD_THRESHOLD = 0.60         # VAD probability threshold
+SAMPLE_RATE = TARGET_SR
 STRIPE_SEC = 2               # Read audio in N-second stripes
 STRIPE_FRAMES = SAMPLE_RATE * STRIPE_SEC
-# Avoid returning ultra-short chunks that break NeMo normalization
-MIN_CHUNK_SAMPLES = 1024     # ~64 ms @16k
+MIN_CHUNK_SAMPLES = 1024     # ~64 ms @16k, avoid ultra-short chunks
 
 # Load Silero VAD model once
 _vad_model, _vad_utils = torch_hub_load("snakers4/silero-vad", "silero_vad")

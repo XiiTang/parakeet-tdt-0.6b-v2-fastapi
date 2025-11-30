@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Uplo
 from .audio import ensure_mono_16k, schedule_cleanup
 from .model import _to_builtin
 from .schemas import TranscriptionResponse, TranscriptionSegment, TranscriptionWord
-from .config import logger
+from .config import logger, BATCH_SIZE
 
 from parakeet_service.model import reset_fast_path
 from parakeet_service.chunker import vad_chunk_lowmem, vad_chunk_streaming
@@ -193,7 +193,7 @@ async def transcribe_audio(
     try:
         outs = asr_model.transcribe(
             [str(p) for p in chunk_paths],
-            batch_size=2,
+            batch_size=BATCH_SIZE,
             timestamps=need_timestamps,
         )
         if (
