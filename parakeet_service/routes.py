@@ -9,11 +9,10 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status, Request, Form
 
 from .audio import ensure_mono_16k, schedule_cleanup
-from .model import _to_builtin
+from .model import _to_builtin, reset_fast_path, cleanup_cuda_cache
 from .schemas import TranscriptionResponse, TranscriptionSegment, TranscriptionWord
 from .config import logger, BATCH_SIZE
 
-from parakeet_service.model import reset_fast_path
 from parakeet_service.chunker import vad_chunk_lowmem, vad_chunk_streaming
 
 
@@ -197,94 +196,98 @@ async def transcribe_audio(
             timestamps=need_timestamps,
         )
         if (
-          not need_timestamps                     # switch back to model fast-path if timestamps turned off
-          and getattr(asr_model.cfg.decoding, "compute_timestamps", False)
+            not need_timestamps  # switch back to model fast-path if timestamps turned off
+            and getattr(asr_model.cfg.decoding, "compute_timestamps", False)
         ):
-          reset_fast_path(asr_model)                    
+            reset_fast_path(asr_model)
+
+        if isinstance(outs, tuple):
+            outs = outs[0]
+        texts = []
+        merged = defaultdict(list)
+
+        for idx, h in enumerate(outs):
+            texts.append(getattr(h, "text", str(h)))
+            if need_timestamps:
+                # Get the time offset for this chunk (in seconds)
+                chunk_offset = chunk_offsets[idx] if idx < len(chunk_offsets) else 0.0
+
+                for k, v in _to_builtin(getattr(h, "timestamp", {})).items():
+                    # Add chunk offset to each timestamp
+                    for item in v:
+                        if isinstance(item, dict):
+                            if 'start' in item:
+                                item['start'] = item['start'] + chunk_offset
+                            if 'end' in item:
+                                item['end'] = item['end'] + chunk_offset
+                    merged[k].extend(v)
+
+        merged_text = " ".join(texts).strip()
+
+        # Convert NeMo timestamps to OpenAI Whisper API format
+        # Always return lists (never None) for OpenAI API compatibility
+        segments: List[TranscriptionSegment] = []
+        words: List[TranscriptionWord] = []
+
+        if need_timestamps and merged:
+            # Build segments from NeMo's 'segment' or fall back to 'word' data
+            if 'segment' in merged and merged['segment']:
+                for i, seg in enumerate(merged['segment']):
+                    segments.append(TranscriptionSegment(
+                        id=i,
+                        seek=0,
+                        start=float(seg.get('start', 0)),
+                        end=float(seg.get('end', 0)),
+                        text=seg.get('segment', '').strip(),
+                        tokens=[],
+                        temperature=0.0,
+                        avg_logprob=0.0,
+                        compression_ratio=1.0,
+                        no_speech_prob=0.0,
+                    ))
+            elif 'word' in merged and merged['word']:
+                # If no segments, create a single segment from all words
+                word_list = merged['word']
+                if word_list:
+                    full_text = ' '.join(w.get('word', '') for w in word_list).strip()
+                    segments.append(TranscriptionSegment(
+                        id=0,
+                        seek=0,
+                        start=float(word_list[0].get('start', 0)),
+                        end=float(word_list[-1].get('end', 0)),
+                        text=full_text,
+                        tokens=[],
+                        temperature=0.0,
+                        avg_logprob=0.0,
+                        compression_ratio=1.0,
+                        no_speech_prob=0.0,
+                    ))
+
+            # Build words list
+            if 'word' in merged and merged['word']:
+                for w in merged['word']:
+                    words.append(TranscriptionWord(
+                        word=w.get('word', ''),
+                        start=float(w.get('start', 0)),
+                        end=float(w.get('end', 0)),
+                    ))
+
+        response = TranscriptionResponse(
+            text=merged_text,
+            task="transcribe",
+            language="en",
+            duration=None,
+            segments=segments,
+            words=words,
+        )
     except RuntimeError as exc:
         logger.exception("ASR failed")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail=str(exc)) from exc
+    finally:
+        cleanup_cuda_cache()
 
-    if isinstance(outs, tuple):
-      outs = outs[0]
-    texts = []
-    merged = defaultdict(list)
-
-    for idx, h in enumerate(outs):
-        texts.append(getattr(h, "text", str(h)))
-        if need_timestamps:
-            # Get the time offset for this chunk (in seconds)
-            chunk_offset = chunk_offsets[idx] if idx < len(chunk_offsets) else 0.0
-            
-            for k, v in _to_builtin(getattr(h, "timestamp", {})).items():
-                # Add chunk offset to each timestamp
-                for item in v:
-                    if isinstance(item, dict):
-                        if 'start' in item:
-                            item['start'] = item['start'] + chunk_offset
-                        if 'end' in item:
-                            item['end'] = item['end'] + chunk_offset
-                merged[k].extend(v)
-
-    merged_text = " ".join(texts).strip()
-    
-    # Convert NeMo timestamps to OpenAI Whisper API format
-    # Always return lists (never None) for OpenAI API compatibility
-    segments: List[TranscriptionSegment] = []
-    words: List[TranscriptionWord] = []
-    
-    if need_timestamps and merged:
-        # Build segments from NeMo's 'segment' or fall back to 'word' data
-        if 'segment' in merged and merged['segment']:
-            for i, seg in enumerate(merged['segment']):
-                segments.append(TranscriptionSegment(
-                    id=i,
-                    seek=0,
-                    start=float(seg.get('start', 0)),
-                    end=float(seg.get('end', 0)),
-                    text=seg.get('segment', '').strip(),
-                    tokens=[],
-                    temperature=0.0,
-                    avg_logprob=0.0,
-                    compression_ratio=1.0,
-                    no_speech_prob=0.0,
-                ))
-        elif 'word' in merged and merged['word']:
-            # If no segments, create a single segment from all words
-            word_list = merged['word']
-            if word_list:
-                full_text = ' '.join(w.get('word', '') for w in word_list).strip()
-                segments.append(TranscriptionSegment(
-                    id=0,
-                    seek=0,
-                    start=float(word_list[0].get('start', 0)),
-                    end=float(word_list[-1].get('end', 0)),
-                    text=full_text,
-                    tokens=[],
-                    temperature=0.0,
-                    avg_logprob=0.0,
-                    compression_ratio=1.0,
-                    no_speech_prob=0.0,
-                ))
-        
-        # Build words list
-        if 'word' in merged and merged['word']:
-            for w in merged['word']:
-                words.append(TranscriptionWord(
-                    word=w.get('word', ''),
-                    start=float(w.get('start', 0)),
-                    end=float(w.get('end', 0)),
-                ))
-
-    return TranscriptionResponse(
-        text=merged_text,
-        task="transcribe",
-        language="en",
-        duration=None,
-        segments=segments,
-        words=words,
-    )
+    return response
 
 @router.get("/debug/cfg")
 def show_cfg(request: Request):

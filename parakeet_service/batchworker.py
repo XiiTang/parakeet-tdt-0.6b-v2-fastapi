@@ -48,6 +48,7 @@ async def batch_worker(model, batch_ms: float = 15.0, max_batch: int = BATCH_SIZ
         logger.debug("processing %d-file batch", len(batch))
 
         # ---------- inference ----------
+        outs = None
         try:
             with torch.inference_mode():
                 outs = model.transcribe(
@@ -57,6 +58,11 @@ async def batch_worker(model, batch_ms: float = 15.0, max_batch: int = BATCH_SIZ
             logger.exception("ASR failed: %s", exc)
             for _ in batch:
                 transcription_queue.task_done()
+            continue
+        finally:
+            mdl.cleanup_cuda_cache()
+
+        if outs is None:
             continue
 
         # ---------- store results & notify ----------

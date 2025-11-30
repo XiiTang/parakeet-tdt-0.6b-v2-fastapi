@@ -24,6 +24,17 @@ def _to_builtin(obj):
     return obj
 
 
+def cleanup_cuda_cache():
+    """Drop unused CUDA allocations so memory returns to the driver."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+        if callable(ipc_collect):
+            ipc_collect()
+
+
 @asynccontextmanager
 async def lifespan(app):
     """Load model once per process; free GPU on shutdown."""
@@ -38,10 +49,8 @@ async def lifespan(app):
             map_location=DEVICE
         ).to(dtype=dtype)
         logger.info("Loaded model with %s weights on %s", MODEL_PRECISION.upper(), DEVICE)
-        
-    # Aggressive cleanup
-    gc.collect()
-    torch.cuda.empty_cache()
+
+    cleanup_cuda_cache()
     logger.info("Memory cleanup complete")
 
     app.state.asr_model = model
@@ -59,8 +68,7 @@ async def lifespan(app):
 
         logger.info("Releasing GPU memory and shutting down worker")
         del app.state.asr_model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()  # free cache but keep driver
+        cleanup_cuda_cache()  # free cache but keep driver
 
 
 def reset_fast_path(model):
